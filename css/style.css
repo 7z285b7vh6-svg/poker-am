@@ -125,6 +125,7 @@ input[type=text], input[type=number], select {
   transition: border-color .15s;
 }
 input:focus, select:focus { border-color: var(--gold); }
+input[readonly] { opacity: 0.65; cursor: not-allowed; }
 .btn {
   border: none;
   border-radius: 10px;

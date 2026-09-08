@@ -10,7 +10,10 @@
 (function () {
   const TURN_SECONDS = 30;
   const AUTO_RUN_DELAY_MS = 900; // pausa entre calles cuando se reparte solo (todos all-in)
+  const SHOWDOWN_REVEAL_DELAY_MS = 1400; // pausa tras ver las 5 cartas antes de calcular el ganador
   const NEXT_HAND_DELAY_MS = 7000; // tiempo que se muestra el resultado antes de la siguiente mano
+  const BOT_THINK_MIN_MS = 900; // "tiempo de reacción" simulado del bot
+  const BOT_THINK_MAX_MS = 2200;
 
   const ROOM_CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // sin caracteres ambiguos
 
@@ -224,6 +227,46 @@
       }
     }
 
+    // ---------------- Bots (solo host, solo en el lobby) ----------------
+
+    static get BOT_NAMES() {
+      return ['Bot Ana 🤖', 'Bot Beto 🤖', 'Bot Caro 🤖', 'Bot Dani 🤖', 'Bot Eva 🤖'];
+    }
+
+    async addBot() {
+      const metaSnap = await this.db.ref(`rooms/${this.roomCode}/meta`).get();
+      const meta = metaSnap.val();
+      if (meta.status !== 'lobby') return { error: 'Solo puedes agregar bots antes de iniciar la partida.' };
+      const playersSnap = await this.db.ref(`rooms/${this.roomCode}/players`).get();
+      const players = playersSnap.val() || {};
+      const count = Object.keys(players).length;
+      if (count >= meta.settings.maxPlayers) return { error: 'La sala ya está llena.' };
+
+      const usedNames = new Set(Object.values(players).map((p) => p.name));
+      const name = RoomController.BOT_NAMES.find((n) => !usedNames.has(n)) || `Bot ${count + 1} 🤖`;
+      const botUid = 'bot_' + Math.random().toString(36).slice(2, 10);
+      await this.db.ref(`rooms/${this.roomCode}/players/${botUid}`).set({
+        name,
+        seat: count,
+        chips: meta.settings.startingChips,
+        status: 'sittingout',
+        currentBet: 0,
+        totalContributed: 0,
+        isHost: false,
+        isBot: true,
+        connected: true,
+      });
+      return { ok: true };
+    }
+
+    async removeBot(uid) {
+      const metaSnap = await this.db.ref(`rooms/${this.roomCode}/meta`).get();
+      const meta = metaSnap.val();
+      if (meta.status !== 'lobby') return { error: 'Solo puedes quitar bots antes de iniciar la partida.' };
+      await this.db.ref(`rooms/${this.roomCode}/players/${uid}`).remove();
+      return { ok: true };
+    }
+
     // ---------------- Iniciar partida (solo host) ----------------
 
     async startGame() {
@@ -233,7 +276,7 @@
       const meta = metaSnap.val();
       const playerList = Object.entries(playersObj)
         .sort((a, b) => a[1].seat - b[1].seat)
-        .map(([uid, p]) => ({ uid, name: p.name, chips: p.chips }));
+        .map(([uid, p]) => ({ uid, name: p.name, chips: p.chips, isBot: !!p.isBot }));
 
       if (playerList.length < 2) return { error: 'Se necesitan al menos 2 jugadores.' };
 
@@ -362,6 +405,7 @@
           currentBet: p.currentBet || 0,
           totalContributed: p.totalContributed || 0,
           holeCards: holeSnaps[i].val() || [],
+          isBot: !!p.isBot,
         }));
 
         this.hostGameState = {
@@ -393,15 +437,35 @@
 
     _afterStateChange() {
       if (!this.hostGameState) return;
-      if (this.turnTimer) { clearInterval(this.turnTimer); this.turnTimer = null; }
+      if (this.turnTimer) { clearInterval(this.turnTimer); clearTimeout(this.turnTimer); this.turnTimer = null; }
 
       const s = this.hostGameState;
+
+      // 'handover' = alguien ganó porque todos los demás se retiraron (fin
+      // inmediato, sin cartas que mostrar). 'showdown' = se llegó al río con
+      // 2+ jugadores: hay que revelar cartas y CALCULAR el ganador. Antes
+      // solo se resolvía 'handover', así que un showdown normal (el caso más
+      // común) nunca llamaba a resolveHand y la mesa se quedaba congelada
+      // para siempre. Ahora se resuelven ambos casos.
       if (s.phase === 'handover') {
         if (!s.results) {
           this.hostGameState = PokerGame.resolveHand(s);
           this._pushPublicState();
         }
         this._scheduleNextHand();
+        return;
+      }
+
+      if (s.phase === 'showdown') {
+        if (s.results) { this._scheduleNextHand(); return; } // ya resuelto (p.ej. tras recuperar el estado)
+        // Pequeña pausa para que se alcancen a ver las 5 cartas comunitarias
+        // antes de que aparezca el resultado — se siente menos brusco.
+        this.turnTimer = setTimeout(() => {
+          if (!this.hostGameState || this.hostGameState.phase !== 'showdown' || this.hostGameState.results) return;
+          this.hostGameState = PokerGame.resolveHand(this.hostGameState);
+          this._pushPublicState();
+          this._scheduleNextHand();
+        }, SHOWDOWN_REVEAL_DELAY_MS);
         return;
       }
 
@@ -416,6 +480,23 @@
       }
 
       if (s.turnSeat !== null && (s.phase === 'preflop' || s.phase === 'flop' || s.phase === 'turn' || s.phase === 'river')) {
+        const turnPlayer = s.players[s.turnSeat];
+
+        if (turnPlayer.isBot) {
+          // El bot "piensa" un ratito random para que se sienta natural, y
+          // decide con la IA heurística de bot.js. No se le pone el
+          // temporizador humano de 30s — nunca se queda esperando.
+          const thinkMs = BOT_THINK_MIN_MS + Math.random() * (BOT_THINK_MAX_MS - BOT_THINK_MIN_MS);
+          this.turnTimer = setTimeout(() => {
+            if (!this.hostGameState || this.hostGameState.turnSeat === null) return;
+            const p = this.hostGameState.players[this.hostGameState.turnSeat];
+            if (!p.isBot || p.uid !== turnPlayer.uid) return; // el turno ya cambió
+            const decision = PokerBot.decideAction(this.hostGameState, p.uid);
+            this._applyLocalAction(p.uid, decision.action, decision.amount);
+          }, thinkMs);
+          return;
+        }
+
         const deadline = this.serverNow() + TURN_SECONDS * 1000;
         this.db.ref(`rooms/${this.roomCode}/game/turnDeadline`).set(deadline);
         this.turnTimer = setInterval(() => {

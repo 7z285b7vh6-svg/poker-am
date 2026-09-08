@@ -35,8 +35,8 @@
           <label>Ciega chica
             <input type="number" id="create-sb" min="1" step="5" value="10" required />
           </label>
-          <label>Ciega grande
-            <input type="number" id="create-bb" min="2" step="5" value="20" required />
+          <label>Ciega grande (siempre el doble)
+            <input type="number" id="create-bb" min="2" step="5" value="20" readonly />
           </label>
         </div>
         <label>Máximo de jugadores
@@ -85,8 +85,9 @@
     <ul class="player-list" id="lobby-players"></ul>
 
     <div id="host-controls" class="hidden">
+      <button class="btn btn-ghost btn-block" id="btn-add-bot">🤖 Agregar bot (para probar)</button>
       <button class="btn btn-primary btn-block" id="btn-start-game">Iniciar partida</button>
-      <p class="hint">Se necesitan al menos 2 jugadores.</p>
+      <p class="hint">Se necesitan al menos 2 jugadores. Puedes llenar los lugares con bots y jugar tú solo.</p>
     </div>
     <p id="waiting-msg" class="hint">Esperando a que el anfitrión inicie la partida…</p>
   </div>
@@ -164,6 +165,7 @@
 <script src="js/deck.js"></script>
 <script src="js/handEvaluator.js"></script>
 <script src="js/game.js"></script>
+<script src="js/bot.js"></script>
 <script src="js/firebase-adapter.js"></script>
 <script src="js/ui.js"></script>
 <script src="js/app.js"></script>

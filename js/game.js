@@ -40,6 +40,7 @@
       currentBet: 0,
       totalContributed: 0,
       holeCards: [],
+      isBot: !!p.isBot,
     }));
     return {
       phase: 'lobby',

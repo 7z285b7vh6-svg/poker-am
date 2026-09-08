@@ -69,6 +69,17 @@
     e.target.value = e.target.value.toUpperCase();
   });
 
+  // La ciega grande siempre es el doble de la chica — no se captura por
+  // separado, se calcula sola para que nunca queden desalineadas.
+  const sbInput = document.getElementById('create-sb');
+  const bbInput = document.getElementById('create-bb');
+  function syncBigBlind() {
+    const sb = Math.max(1, Number(sbInput.value) || 0);
+    bbInput.value = sb * 2;
+  }
+  sbInput.addEventListener('input', syncBigBlind);
+  syncBigBlind();
+
   // ---------------- Crear sala ----------------
   document.getElementById('form-create').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -76,10 +87,9 @@
     errBox.textContent = '';
     const hostName = document.getElementById('create-name').value.trim();
     const startingChips = Number(document.getElementById('create-chips').value);
-    const smallBlind = Number(document.getElementById('create-sb').value);
-    const bigBlind = Number(document.getElementById('create-bb').value);
+    const smallBlind = Math.max(1, Number(document.getElementById('create-sb').value) || 0);
+    const bigBlind = smallBlind * 2; // forzado siempre, sin importar lo que muestre el campo
     const maxPlayers = Number(document.getElementById('create-max').value);
-    if (bigBlind <= smallBlind) { errBox.textContent = 'La ciega grande debe ser mayor que la chica.'; return; }
     if (!hostName) return;
     myNameCache = hostName;
     const submitBtn = e.target.querySelector('button[type=submit]');
@@ -139,6 +149,11 @@
     if (res && res.error) UI.showToast(res.error);
   });
 
+  document.getElementById('btn-add-bot').addEventListener('click', async () => {
+    const res = await controller.addBot();
+    if (res && res.error) UI.showToast(res.error);
+  });
+
   document.getElementById('btn-play-again').addEventListener('click', async () => {
     await controller.resetToLobby();
   });
@@ -171,7 +186,10 @@
   });
   document.getElementById('btn-raise-confirm').addEventListener('click', () => {
     const amount = Number(document.getElementById('raise-input').value);
-    doAction('raise', amount);
+    // Si el monto elegido deja al jugador sin fichas, es un all-in de
+    // verdad — se manda como tal para que quede clarísimo en el historial
+    // y no se sienta como que "se marcó all-in sin querer".
+    doAction(amount >= currentRaiseMax ? 'allin' : 'raise', amount);
     closeRaiseRow();
   });
   function closeRaiseRow() {
@@ -179,13 +197,26 @@
     document.getElementById('btn-raise-open').classList.remove('hidden');
     document.getElementById('btn-raise-confirm').classList.add('hidden');
   }
+
+  // Recuerda el tope actual (all-in) para poder avisar cuando el slider lo alcanza.
+  let currentRaiseMax = 0;
+  function refreshRaiseConfirmLabel() {
+    const value = Number(document.getElementById('raise-input').value);
+    const btn = document.getElementById('btn-raise-confirm');
+    const isAllIn = currentRaiseMax > 0 && value >= currentRaiseMax;
+    btn.textContent = isAllIn ? '🔥 Confirmar ALL-IN' : 'Confirmar subida';
+    btn.classList.toggle('btn-allin', isAllIn);
+  }
+
   document.getElementById('raise-slider').addEventListener('input', (e) => {
     document.getElementById('raise-input').value = e.target.value;
     e.target.dataset.touched = '1';
+    refreshRaiseConfirmLabel();
   });
   document.getElementById('raise-input').addEventListener('input', (e) => {
     document.getElementById('raise-slider').value = e.target.value;
     document.getElementById('raise-slider').dataset.touched = '1';
+    refreshRaiseConfirmLabel();
   });
 
   function doAction(action, amount) {
@@ -221,9 +252,13 @@
   controller.on('players', (players) => {
     latestPlayers = players || {};
     if (latestMeta && latestMeta.status === 'lobby') {
-      UI.renderLobbyPlayers(latestPlayers, latestMeta.hostUid);
+      UI.renderLobbyPlayers(latestPlayers, latestMeta.hostUid, {
+        isHost: controller.isHost,
+        onRemoveBot: (uid) => controller.removeBot(uid),
+      });
       const count = Object.keys(latestPlayers).length;
       document.getElementById('btn-start-game').disabled = count < 2;
+      document.getElementById('btn-add-bot').disabled = count >= (latestMeta.settings ? latestMeta.settings.maxPlayers : 5);
     }
     if (latestMeta && latestMeta.status === 'ended') {
       UI.renderEndedStandings(latestPlayers);
@@ -313,12 +348,15 @@
     if (!slider.dataset.touched) {
       slider.value = input.value = minRaiseTotal;
     }
+    currentRaiseMax = maxTotal;
+    refreshRaiseConfirmLabel();
 
     const quickBox = document.getElementById('quick-bets');
     quickBox.innerHTML = '';
     const quickOptions = [
       { label: '½ bote', value: clamp(tableBet + Math.round(potNow / 2), minRaiseTotal, maxTotal) },
       { label: 'Bote', value: clamp(tableBet + potNow, minRaiseTotal, maxTotal) },
+      { label: 'All-in', value: maxTotal },
     ];
     for (const opt of quickOptions) {
       const b = document.createElement('button');
@@ -327,6 +365,7 @@
       b.addEventListener('click', () => {
         slider.value = input.value = opt.value;
         slider.dataset.touched = '1';
+        refreshRaiseConfirmLabel();
       });
       quickBox.appendChild(b);
     }

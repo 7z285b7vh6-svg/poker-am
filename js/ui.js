@@ -59,7 +59,7 @@
     for (const it of items) box.appendChild(el('span', null, it));
   }
 
-  function renderLobbyPlayers(playersObj, hostUid) {
+  function renderLobbyPlayers(playersObj, hostUid, opts = {}) {
     const ul = document.getElementById('lobby-players');
     ul.innerHTML = '';
     const list = Object.entries(playersObj || {}).sort((a, b) => a[1].seat - b[1].seat);
@@ -70,7 +70,15 @@
       li.appendChild(dot);
       li.appendChild(name);
       if (uid === hostUid) li.appendChild(el('span', 'p-host', 'Anfitrión'));
+      if (p.isBot) li.appendChild(el('span', 'p-host', 'Bot'));
       li.appendChild(el('span', 'p-chips', fmtChips(p.chips)));
+      if (p.isBot && opts.isHost && opts.onRemoveBot) {
+        const removeBtn = el('button', 'icon-btn', '✕');
+        removeBtn.type = 'button';
+        removeBtn.title = 'Quitar bot';
+        removeBtn.addEventListener('click', () => opts.onRemoveBot(uid));
+        li.appendChild(removeBtn);
+      }
       ul.appendChild(li);
     }
   }

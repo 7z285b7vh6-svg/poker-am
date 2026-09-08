@@ -120,6 +120,17 @@ en vez de pegarlas a mano en la consola.)
 7. Si alguien recarga la página o pierde la conexión, al volver a entrar con
    el mismo enlace recupera su lugar en la sala automáticamente.
 
+## Jugar solo contra bots (para probar)
+
+En el lobby, el anfitrión tiene un botón **"🤖 Agregar bot"**: agrega un
+jugador con IA que ocupa un lugar en la mesa. Puedes llenar toda la sala de
+bots y jugar tú solo para probar la app, o mezclar amigos reales con bots
+para completar la mesa. Los bots deciden con una lógica heurística (fuerza
+de mano estimada, cuentas del bote, algo de farol ocasional) — no es un
+solver perfecto, pero juega de forma razonable y sirve para encontrar bugs
+jugando muchas manos rápido. Solo se pueden agregar/quitar bots antes de
+darle a "Iniciar partida".
+
 ## Probar la lógica del juego
 
 El motor de reglas (`js/game.js`) es código puro de JavaScript y se puede
@@ -133,6 +144,10 @@ Corre varios escenarios (mano completa hasta el showdown, alguien se retira
 antes del río, botes laterales con jugadores all-in de distinto tamaño de
 stack, empates) y verifica que las fichas siempre cuadren.
 
+También puedes correr `node test-bot.js`, que simula cientos de manos
+completas jugadas únicamente por bots (2, 3, 4 y 5 jugadores) para
+verificar que el motor nunca se traba ni descuadra las fichas.
+
 ## Estructura del proyecto
 
 ```
@@ -141,6 +156,7 @@ css/style.css             Todos los estilos
 js/deck.js                Baraja y barajado
 js/handEvaluator.js       Evaluador de manos de poker
 js/game.js                Motor de reglas (puro, testeable)
+js/bot.js                 IA heurística del bot (puro, testeable)
 js/firebase-adapter.js    Conecta el motor con Firebase (solo lo usa el host)
 js/firebase-config.js     ← aquí pegas tu configuración de Firebase
 js/ui.js                  Renderizado de la mesa
@@ -148,6 +164,7 @@ js/app.js                 Pantallas y cableado de botones
 database.rules.json       Reglas de seguridad de Realtime Database
 firebase.json             (opcional) config para Firebase Hosting/CLI
 test-game.js              Pruebas del motor de reglas
+test-bot.js               Simulación de cientos de manos jugadas por bots
 ```
 
 ## Ideas para seguir mejorando
